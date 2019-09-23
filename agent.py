@@ -17,7 +17,8 @@ from optionpricing import *
 
 """
 THINGS TO DO:
-1. Add resume capability
+1. Store stock price, option price, cash, delta, stock position
+2. Add resume capability with reproducibility
 """
 
 class Estimator(nn.Module):
@@ -60,8 +61,6 @@ class Agent:
         self.epsilon_min = args.epsilon_min
         self.savedir = args.savedir
 
-        self.replay_memory = deque(maxlen = args.replay_memory_size)
-
         self.transition = namedtuple('Transition',
             ['old_state', 'action', 'reward', 'new_state', 'done'])
 
@@ -82,9 +81,6 @@ class Agent:
         file_handler.setFormatter(formatter)
         self.logger.addHandler(file_handler)
 
-        # Initialize replay memory
-        self.initialize_replay_memory(self.batch_size)
-
         # Initialize model
         self.device = torch.device("cuda:0" if args.cuda else "cpu")
         self.ngpu = args.ngpu
@@ -94,16 +90,28 @@ class Agent:
         self.estimator = Estimator(self.device, self.ngpu, state_space_dim, env.action_space.n)
         self.target = Estimator(self.device, self.ngpu, state_space_dim, env.action_space_dim)
 
-        # Copy estimator state_dict to target
-        self.target.load_state_dict(self.estimator.state_dict())
-
         # Optimization
         self.criterion = nn.SmoothL1Loss()
         self.optimizer = optim.Adam(self.estimator.parameters(), lr = args.lr, betas = (args.beta1, 0.999))
 
-        # Training details
-        self.episodes = 0
-        self.steps = 0
+        if args.resume:
+            try:
+                self.load_checkpoint(os.path.join('experiments', args.savedir, 'checkpoint.pth'))
+            except FileNotFoundError:
+                print('Checkpoint not found')
+
+        else:
+            self.replay_memory = deque(maxlen = args.replay_memory_size)
+
+            # Initialize replay memory
+            self.initialize_replay_memory(self.batch_size)
+
+            # Copy estimator state_dict to target
+            self.target.load_state_dict(self.estimator.state_dict())
+
+            # Training details
+            self.episode = 0
+            self.steps = 0
 
 
     def initialize_replay_memory(self, size):
@@ -137,7 +145,7 @@ class Agent:
         best_reward = -np.inf
 
         for episode in tqdm(range(n_episodes)):
-            self.episodes += 1
+            self.episode += 1
             episode_reward = 0
             episode_steps = 0
             episode_history = []
@@ -216,11 +224,13 @@ class Agent:
             mean_reward = np.mean(train_rewards[-self.best_reward_criteria:])
             if mean_reward > best_reward:
                 best_reward = mean_reward
-                self.estimator.save(os.path.join('experiments', self.savedir))
+                self.save_checkpoint(os.path.join('experiments', self.savedir, 'best.pth'))
 
             # Log statistics
-            self.logger.info(f'LOG: episode:{self.episodes}, epsilon:{self.epsilon}, steps:{episode_steps}, reward:{episode_reward}, best_mean_reward:{best_reward}, average_loss:{np.mean(losses)}')
+            self.logger.info(f'LOG: episode:{self.episode}, epsilon:{self.epsilon}, steps:{episode_steps}, reward:{episode_reward}, best_mean_reward:{best_reward}, average_loss:{np.mean(losses)}')
 
+            if not self.episode % self.checkpoint-every:
+                self.save_checkpoint('experiments', self.args.savedir, 'checkpoint.pth')
 
     def simulate(self):
         state = self.env.reset().reshape(1, -1).to(self.device)
@@ -232,3 +242,92 @@ class Agent:
             state = state.reshape(1, -1).to(self.device)
 
         self.env.close() # To be implemented
+
+
+    def save_checkpoint(self, path):
+        checkpoint = {
+            'episode': self.episode,
+            'steps': self.steps,
+            'estimator': self.estimator.state_dict(),
+            'target': self.target.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'replay_memory': self.replay_memory,
+            'random_state': random.getstate(),
+            'numpy_random_state': np.random.get_state(),
+            'torch_random_state': torch.get_rng_state()
+        }
+        torch.save(checkpoint, path)
+
+    def load_checkpoint(self, path):
+        checkpoint = torch.load(path)
+        self.episode = checkpoint['episode']
+        self.steps = checkpoint['steps']
+        self.estimator.load_state_dict(checkpoint['estimator'])
+        self.target.load_state_dict(checkpoint['target'])
+        self.optimizer.load_state_dict(checkpoint['target'])
+        self.replay_memory = checkpoint['replay_memory']
+        random.setstate(checkpoint['random_state'])
+        np.random.set_state(checkpoint['numpy_random_state'])
+        torch.set_rng_state(checkpoint['torch_random_state'])
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-ne', '--n_episodes', type = int, default = 100, help = 'number of episodes to train')
+    parser.add_argument('-el', '--episode_length', type = int, default = 1000, help = 'maximum episode length')
+    parser.add_argument('-e', '--epsilon', type = float, default = 1, help = 'e-greedy probability')
+    parser.add_argument('-d', '--decay', type = float, default = 0.99, help = 'decay of epsilon per episode')
+    parser.add_argument('-emin', '--epsilon_min', type = float, default = 0.05, help = 'minumum value taken by epsilon')
+    parser.add_argument('-g', '--gamma', type = float, default = 0.99, help = 'discount factor')
+    parser.add_argument('-ue', '--update_every', type = int, default = 500, help = 'number of steps after which to update the target model')
+    parser.add_argument('-re', '--record_every', type = int, default = 500, help = 'number of episodes after which to record an episode')
+    parser.add_argument('-ce', '--checkpoint-every', type = int, default = 100, help = 'number of episodes after which to checkpoint')
+    parser.add_argument('-r', '--resume', action = 'store_true', help = 'resume from previous checkpoint from save directory')
+    parser.add_argument('-bs', '--batch_size', type = int, default = 128, help = 'batch size')
+    parser.add_argument('-rms', '--replay_memory_size', type = int, default = 50000, help = 'replay memory size')
+    parser.add_argument('-s', '--seed', type = int, help = 'random seed')
+    parser.add_argument('-sd', '--savedir', type = str, help = 'save directory')
+    parser.add_argument('-lr', '--lr', type = float, default = 0.001, help = 'learning rate')
+    parser.add_argument('-b', '--beta1', type = float, default = 0.9, help = 'beta1')
+
+    args = parser.parse_args()
+
+    if args.seed is None:
+        args.seed = random.randint(1, 10000)
+
+    if args.savedir is None:
+        args.savedir = time.strftime('%Y-%m-%d_%H:%M:%S', time.localtime())
+
+    try:
+        os.makedirs(os.path.join('experiments', args.savedir))
+    except OSError:
+        pass
+
+    if not args.resume:
+        with open(os.path.join('experiments', args.savedir, 'config.yaml'), 'w') as f:
+            yaml.dump(vars(args), f)
+
+    config = {
+        'S': 100,
+        'T': 10, # 10 days
+        'L': 1,
+        'm': 100, # L options for m stocks
+        'n': 0,
+        'K': 100,
+        'D': 5,
+        'mu': 0,
+        'sigma': 0.01,
+        'r': 0,
+        'ss': 5,
+        'kappa': 0.1
+        }
+    env = OptionPricingEnv()
+    env.configure(**config)
+
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+
+    agent = Agent(env, args)
+    agent.train(args.n_episodes, args.episode_length)
+    #agent.simulate()
