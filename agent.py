@@ -46,7 +46,7 @@ class Estimator(nn.Module):
 
 
 class Agent:
-    def __init__(self, args):
+    def __init__(self, env, args):
 
         self.args = args
 
@@ -65,6 +65,8 @@ class Agent:
         self.transition = namedtuple('Transition',
             ['old_state', 'action', 'reward', 'new_state', 'done'])
 
+        self.best_reward_criteria = 10 # If mean reward over last 'best_reward_critera' > best_reward, save model
+
         # Get valid actions
         try:
             self.valid_actions = list(range(env.action_space.n))
@@ -82,6 +84,22 @@ class Agent:
 
         # Initialize replay memory
         self.initialize_replay_memory(self.batch_size)
+
+        # Initialize model
+        self.device = torch.device("cuda:0" if args.cuda else "cpu")
+        self.ngpu = args.ngpu
+        state_shape = env.observation_space.shape
+        state_space_dim = state_shape[0] if len(state_shape) == 1 else state_shape
+
+        self.estimator = Estimator(self.device, self.ngpu, state_space_dim, env.action_space.n)
+        self.target = Estimator(self.device, self.ngpu, state_space_dim, env.action_space_dim)
+
+        # Copy estimator state_dict to target
+        self.target.load_state_dict(self.estimator.state_dict())
+
+        # Optimization
+        self.criterion = nn.SmoothL1Loss()
+        self.optimizer = optim.Adam(self.estimator.parameters(), lr = args.lr, betas = (args.beta1, 0.999))
 
         # Training details
         self.episodes = 0
@@ -110,3 +128,107 @@ class Agent:
                 old_state = new_state
 
         self.logger.info(f'INFO: Replay memory initialized with {size} experiences')
+
+    def train(self, n_episodes, episode_length):
+        """
+        Train the agent
+        """
+        train_rewards = []
+        best_reward = -np.inf
+
+        for episode in tqdm(range(n_episodes)):
+            self.episodes += 1
+            episode_reward = 0
+            episode_steps = 0
+            episode_history = []
+            losses = []
+            done = False
+
+            old_state = self.env.reset()
+
+            while not done:
+                ####################################################
+                # Select e-greedy action                           #
+                ####################################################
+                if random.random() <= self.epsilon:
+                    action = random.choice(self.valid_actions)
+
+                else:
+                    old_state = torch.from_numpy(old_state.reshape(1, -1)).to(self.device)
+                    action = np.argmax(self.estimator(old_state).item())
+
+                ####################################################
+                # Env step and store experience in replay memory   #
+                ####################################################
+                new_state, reward, done, info = self.env.step(action)
+
+                self.replay_memory.append(self.transition(old_state, action,
+                    reward, new_state, done))
+
+                episode_history.append(self.transition(old_state, action,
+                    reward, new_state, done))
+
+                episode_reward += reward
+                episode_steps += 1
+                self.steps += 1
+
+                ####################################################
+                # Sample batch and fit to model                    #
+                ####################################################
+                batch = random.sample(self.replay_memory, self.batch_size)
+                old_states, actions, rewards, new_states, is_done = map(np.array, zip(*batch))
+                is_done = is_done.astype(np.uint8)
+
+                old_states = torch.from_numpy(old_states).to(self.device)
+                new_states = torch.from_numpy(new_states).to(self.device)
+                rewards = torch.from_numpy(rewards).to(self.device)
+                is_done = torch.from_numpy(is_done).to(self.device)
+                actions = torch.from_numpy(actions).long().to(self.device)
+
+                # Q_old = reward + discount * max[over actions](Q_new)
+                # Old Q value = reward + discounted Q value of new state
+                q_values = self.estimator(old_states)
+                q_target = self.target(new_states)
+                max_q, _ = torch.max(q_target, dim = 1)
+                q_target = rewards + self.gamma * (~is_done) * max_q
+
+                # Gather those Q values for which action was taken | since the output is Q values for all possible actions
+                q_values_expected = q_values.gather(1, actions.view(-1, 1)).view(-1)
+
+                loss = self.criterion(q_values_expected, q_target)
+                self.estimator.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+                if not self.steps % self.update_every:
+                    self.target.load_state_dict(self.estimator.state_dict())
+
+                old_state = new_state
+
+                if episode_steps >= episode_length:
+                    break
+
+            # Epsilon decay
+            self.epsilon *= self.decay
+            self.epsilon = max(self.epsilon, self.epsilon_min)
+
+            train_rewards.append(episode_reward)
+            mean_reward = np.mean(train_rewards[-self.best_reward_criteria:])
+            if mean_reward > best_reward:
+                best_reward = mean_reward
+                self.estimator.save(os.path.join('experiments', self.savedir))
+
+            # Log statistics
+            self.logger.info(f'LOG: episode:{self.episodes}, epsilon:{self.epsilon}, steps:{episode_steps}, reward:{episode_reward}, best_mean_reward:{best_reward}, average_loss:{np.mean(losses)}')
+
+
+    def simulate(self):
+        state = self.env.reset().reshape(1, -1).to(self.device)
+        done = False
+        while not done:
+            self.env.render() # To be implemented
+            action = np.argmax(self.estimator(state).item())
+            state, reward, done, info = self.env.step(action)
+            state = state.reshape(1, -1).to(self.device)
+
+        self.env.close() # To be implemented
