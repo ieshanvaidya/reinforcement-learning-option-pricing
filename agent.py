@@ -15,6 +15,9 @@ import yaml
 import csv
 from optionpricing import *
 
+transition = namedtuple('transition',
+            ['old_state', 'action', 'reward', 'new_state', 'done'])
+
 """
 THINGS TO DO:
 1. Store stock price, option price, cash, delta, stock position
@@ -48,7 +51,7 @@ class Estimator(nn.Module):
 
 class Agent:
     def __init__(self, env, args):
-
+        self.env = env
         self.args = args
 
         self.epsilon = args.epsilon
@@ -61,8 +64,8 @@ class Agent:
         self.epsilon_min = args.epsilon_min
         self.savedir = args.savedir
 
-        self.transition = namedtuple('Transition',
-            ['old_state', 'action', 'reward', 'new_state', 'done'])
+        #self.transition = namedtuple('Transition',
+        #    ['old_state', 'action', 'reward', 'new_state', 'done'])
 
         self.best_reward_criteria = 10 # If mean reward over last 'best_reward_critera' > best_reward, save model
 
@@ -88,7 +91,7 @@ class Agent:
         state_space_dim = state_shape[0] if len(state_shape) == 1 else state_shape
 
         self.estimator = Estimator(self.device, self.ngpu, state_space_dim, env.action_space.n)
-        self.target = Estimator(self.device, self.ngpu, state_space_dim, env.action_space_dim)
+        self.target = Estimator(self.device, self.ngpu, state_space_dim, env.action_space.n)
 
         # Optimization
         self.criterion = nn.SmoothL1Loss()
@@ -97,6 +100,7 @@ class Agent:
         if args.resume:
             try:
                 self.load_checkpoint(os.path.join('experiments', args.savedir, 'checkpoint.pth'))
+                self.logger.info('INFO: Resuming from checkpoint')
             except FileNotFoundError:
                 print('Checkpoint not found')
 
@@ -112,6 +116,7 @@ class Agent:
             # Training details
             self.episode = 0
             self.steps = 0
+            self.best_reward = -np.inf
 
 
     def initialize_replay_memory(self, size):
@@ -128,7 +133,7 @@ class Agent:
         for i in range(size):
             action = random.choice(self.valid_actions)
             new_state, reward, done, _ = self.env.step(action)
-            self.replay_memory.append(self.transition(old_state, action,
+            self.replay_memory.append(transition(old_state, action,
                 reward, new_state, done))
             if done:
                 old_state = self.env.reset()
@@ -142,7 +147,6 @@ class Agent:
         Train the agent
         """
         train_rewards = []
-        best_reward = -np.inf
 
         for episode in tqdm(range(n_episodes)):
             self.episode += 1
@@ -162,18 +166,20 @@ class Agent:
                     action = random.choice(self.valid_actions)
 
                 else:
-                    old_state = torch.from_numpy(old_state.reshape(1, -1)).to(self.device)
-                    action = np.argmax(self.estimator(old_state).item())
+                    with torch.no_grad():
+                        old_state = torch.from_numpy(old_state.reshape(1, -1)).to(self.device)
+                        action = np.argmax(self.estimator(old_state).numpy())
+                        old_state = old_state.numpy().reshape(-1)
 
                 ####################################################
                 # Env step and store experience in replay memory   #
                 ####################################################
                 new_state, reward, done, info = self.env.step(action)
 
-                self.replay_memory.append(self.transition(old_state, action,
+                self.replay_memory.append(transition(old_state, action,
                     reward, new_state, done))
 
-                episode_history.append(self.transition(old_state, action,
+                episode_history.append(transition(old_state, action,
                     reward, new_state, done))
 
                 episode_reward += reward
@@ -185,28 +191,31 @@ class Agent:
                 ####################################################
                 batch = random.sample(self.replay_memory, self.batch_size)
                 old_states, actions, rewards, new_states, is_done = map(np.array, zip(*batch))
-                is_done = is_done.astype(np.uint8)
+                rewards = rewards.astype(np.float32)
 
                 old_states = torch.from_numpy(old_states).to(self.device)
                 new_states = torch.from_numpy(new_states).to(self.device)
                 rewards = torch.from_numpy(rewards).to(self.device)
-                is_done = torch.from_numpy(is_done).to(self.device)
+                is_not_done = torch.from_numpy(np.logical_not(is_done)).to(self.device)
                 actions = torch.from_numpy(actions).long().to(self.device)
 
                 # Q_old = reward + discount * max[over actions](Q_new)
                 # Old Q value = reward + discounted Q value of new state
-                q_values = self.estimator(old_states)
-                q_target = self.target(new_states)
-                max_q, _ = torch.max(q_target, dim = 1)
-                q_target = rewards + self.gamma * (~is_done) * max_q
+
+                with torch.no_grad():
+                    q_target = self.target(new_states)
+                    max_q, _ = torch.max(q_target, dim = 1)
+                    q_target = rewards + self.gamma * is_not_done.float() * max_q
 
                 # Gather those Q values for which action was taken | since the output is Q values for all possible actions
-                q_values_expected = q_values.gather(1, actions.view(-1, 1)).view(-1)
+                q_values_expected = self.estimator(old_states).gather(1, actions.view(-1, 1)).view(-1)
 
                 loss = self.criterion(q_values_expected, q_target)
                 self.estimator.zero_grad()
                 loss.backward()
                 self.optimizer.step()
+
+                losses.append(loss.item())
 
                 if not self.steps % self.update_every:
                     self.target.load_state_dict(self.estimator.state_dict())
@@ -222,15 +231,15 @@ class Agent:
 
             train_rewards.append(episode_reward)
             mean_reward = np.mean(train_rewards[-self.best_reward_criteria:])
-            if mean_reward > best_reward:
-                best_reward = mean_reward
+            if mean_reward > self.best_reward:
+                self.best_reward = mean_reward
                 self.save_checkpoint(os.path.join('experiments', self.savedir, 'best.pth'))
 
             # Log statistics
-            self.logger.info(f'LOG: episode:{self.episode}, epsilon:{self.epsilon}, steps:{episode_steps}, reward:{episode_reward}, best_mean_reward:{best_reward}, average_loss:{np.mean(losses)}')
+            self.logger.info(f'LOG: episode:{self.episode}, epsilon:{self.epsilon}, steps:{episode_steps}, reward:{episode_reward}, best_mean_reward:{self.best_reward}, mean_loss:{np.mean(losses)}')
 
-            if not self.episode % self.checkpoint-every:
-                self.save_checkpoint('experiments', self.args.savedir, 'checkpoint.pth')
+            if not self.episode % self.args.checkpoint_every:
+                self.save_checkpoint(os.path.join('experiments', self.args.savedir, 'checkpoint.pth'))
 
     def simulate(self):
         state = self.env.reset().reshape(1, -1).to(self.device)
@@ -248,13 +257,15 @@ class Agent:
         checkpoint = {
             'episode': self.episode,
             'steps': self.steps,
+            'epsilon': self.epsilon,
             'estimator': self.estimator.state_dict(),
             'target': self.target.state_dict(),
             'optimizer': self.optimizer.state_dict(),
             'replay_memory': self.replay_memory,
             'random_state': random.getstate(),
             'numpy_random_state': np.random.get_state(),
-            'torch_random_state': torch.get_rng_state()
+            'torch_random_state': torch.get_rng_state(),
+            'best_reward': self.best_reward
         }
         torch.save(checkpoint, path)
 
@@ -262,13 +273,15 @@ class Agent:
         checkpoint = torch.load(path)
         self.episode = checkpoint['episode']
         self.steps = checkpoint['steps']
+        self.epsilon = checkpoint['epsilon']
         self.estimator.load_state_dict(checkpoint['estimator'])
         self.target.load_state_dict(checkpoint['target'])
-        self.optimizer.load_state_dict(checkpoint['target'])
+        self.optimizer.load_state_dict(checkpoint['optimizer'])
         self.replay_memory = checkpoint['replay_memory']
         random.setstate(checkpoint['random_state'])
         np.random.set_state(checkpoint['numpy_random_state'])
         torch.set_rng_state(checkpoint['torch_random_state'])
+        self.best_reward = checkpoint['best_reward']
 
 
 if __name__ == '__main__':
@@ -289,6 +302,8 @@ if __name__ == '__main__':
     parser.add_argument('-sd', '--savedir', type = str, help = 'save directory')
     parser.add_argument('-lr', '--lr', type = float, default = 0.001, help = 'learning rate')
     parser.add_argument('-b', '--beta1', type = float, default = 0.9, help = 'beta1')
+    parser.add_argument('-cuda', '--cuda', action = 'store_true', help = 'cuda')
+    parser.add_argument('-ngpu', '--ngpu', type = int, default = 0, help = 'number of gpu')
 
     args = parser.parse_args()
 
@@ -307,6 +322,10 @@ if __name__ == '__main__':
         with open(os.path.join('experiments', args.savedir, 'config.yaml'), 'w') as f:
             yaml.dump(vars(args), f)
 
+        random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        np.random.seed(args.seed)
+
     config = {
         'S': 100,
         'T': 10, # 10 days
@@ -323,10 +342,6 @@ if __name__ == '__main__':
         }
     env = OptionPricingEnv()
     env.configure(**config)
-
-    random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
 
     agent = Agent(env, args)
     agent.train(args.n_episodes, args.episode_length)

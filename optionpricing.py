@@ -195,12 +195,12 @@ class OptionPricingEnv:
 
         self.done = self.steps == 0
 
-        return np.array(states[-1]), reward, self.done, info
+        return np.array(states[-1], dtype = np.float32), reward, self.done, info
 
     def reset(self):
         # Should return the state
         self.configure(**self.init_config)
-        return np.array([self.S / self.S0, self.t, self.n / self.high])
+        return np.array([self.S / self.S0, self.t, self.n / self.high], dtype = np.float32)
         #return np.array([self.S, self.t, self.n])
 
     def render(self):
