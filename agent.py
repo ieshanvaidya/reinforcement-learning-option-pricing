@@ -15,14 +15,10 @@ import yaml
 import csv
 from optionpricing import *
 
+# Defining transition namedtuple here rather than within the class to ensure pickle functionality
 transition = namedtuple('transition',
             ['old_state', 'action', 'reward', 'new_state', 'done'])
 
-"""
-THINGS TO DO:
-1. Store stock price, option price, cash, delta, stock position
-2. Add resume capability with reproducibility
-"""
 
 class Estimator(nn.Module):
     def __init__(self, device, ngpu, state_space_dim, action_space_dim):
@@ -33,11 +29,11 @@ class Estimator(nn.Module):
         self.action_space_dim = action_space_dim
 
         self.model = nn.Sequential(
-            nn.Linear(self.state_space_dim, 64),
+            nn.Linear(self.state_space_dim, 256),
             nn.ReLU(),
-            nn.Linear(64, 64),
+            nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(64, self.action_space_dim)
+            nn.Linear(256, self.action_space_dim)
         )
 
     def forward(self, x):
@@ -242,6 +238,9 @@ class Agent:
                 self.save_checkpoint(os.path.join('experiments', self.args.savedir, 'checkpoint.pth'))
 
     def simulate(self):
+        """
+        Simulation of one episode
+        """
         state = self.env.reset().reshape(1, -1).to(self.device)
         done = False
         while not done:
@@ -304,6 +303,7 @@ if __name__ == '__main__':
     parser.add_argument('-b', '--beta1', type = float, default = 0.9, help = 'beta1')
     parser.add_argument('-cuda', '--cuda', action = 'store_true', help = 'cuda')
     parser.add_argument('-ngpu', '--ngpu', type = int, default = 0, help = 'number of gpu')
+    #parser.add_argument('-clip', '--clip', action = 'store_true', help = 'clip reward')
 
     args = parser.parse_args()
 
