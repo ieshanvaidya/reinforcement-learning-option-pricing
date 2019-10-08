@@ -6,8 +6,11 @@ from collections import namedtuple
 
 
 def compute_call(S, K, t, r, sigma):
+    if np.isclose(t, 0):
+        return max(0, S - K)
+
     if t == 0:
-        return S - K
+        return max(0, S - K)
 
     d1 = ((np.log(S / K) + (r + sigma ** 2 / 2) * t)) / sigma / np.sqrt(t)
     d2 = d1 - sigma * np.sqrt(t)
@@ -16,6 +19,9 @@ def compute_call(S, K, t, r, sigma):
     return call
 
 def compute_greeks(S, K, t, r, sigma):
+    if np.isclose(t, 0):
+        return 1, 0
+
     if t == 0:
         return 1, 0
 
@@ -185,16 +191,16 @@ class OptionPricingEnv:
 
         self.steps -= 1
 
-        pnl = compute_pnl(init_portfolio, self.portfolio, self.trading_cost)
-
         ticksize = 0.1
         multiplier = 1
         cost = multiplier * ticksize * (abs(num_stocks) + 0.01 * num_stocks ** 2)
         self.cash -= cost
 
-        #reward = pnl - 0.5 * self.kappa * (pnl ** 2) - cost
-        reward = min(pnl - 0.5 * self.kappa * (pnl ** 2) - cost, 10)
-        reward = max(reward, -10)
+        pnl = compute_pnl(init_portfolio, self.portfolio, self.trading_cost)
+
+        reward = 0.01 * (pnl - 0.5 * self.kappa * (pnl ** 2) - cost)
+        #reward = min(pnl - 0.5 * self.kappa * (pnl ** 2) - cost, 100)
+        #reward = max(reward, -100)
 
         info = {'call': np.array(calls), 'delta': np.array(deltas), 'gamma': np.array(gammas)}
 
