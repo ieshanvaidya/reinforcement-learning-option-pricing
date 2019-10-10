@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
 import gym
 import random
 from collections import deque, namedtuple
@@ -56,7 +57,7 @@ class Agent:
         self.batch_size = args.batch_size
         self.replay_memory_size = args.replay_memory_size
         self.update_every = args.update_every
-        self.record_every = args.record_every
+        #self.record_every = args.record_every
         self.epsilon_min = args.epsilon_min
         self.savedir = args.savedir
 
@@ -71,7 +72,6 @@ class Agent:
         except AttributeError as e:
             print(f'Action space is not Discrete, {e}')
 
-
         # Logging
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
@@ -79,6 +79,10 @@ class Agent:
         file_handler = logging.FileHandler(os.path.join('experiments', args.savedir, 'training.log'))
         file_handler.setFormatter(formatter)
         self.logger.addHandler(file_handler)
+        self.logger.propagate = False
+
+        # Tensorboard
+        self.writer = SummaryWriter(log_dir = os.path.join('experiments', self.savedir), flush_secs = 5)
 
         # Initialize model
         self.device = torch.device("cuda:0" if args.cuda else "cpu")
@@ -96,7 +100,7 @@ class Agent:
         if args.resume:
             try:
                 self.load_checkpoint(os.path.join('experiments', args.savedir, 'checkpoint.pth'))
-                self.logger.info('INFO: Resuming from checkpoint')
+                self.logger.info(f'INFO: Resuming from checkpoint; episode: {self.episode}')
             except FileNotFoundError:
                 print('Checkpoint not found')
 
@@ -146,26 +150,31 @@ class Agent:
 
         for episode in tqdm(range(n_episodes)):
             self.episode += 1
-            episode_reward = 0
+            episode_rewards = []
             episode_steps = 0
             episode_history = []
             losses = []
             done = False
+            kind = None # Type of action taken
+            step = 0
 
             old_state = self.env.reset()
 
             while not done:
+                step += 1
                 ####################################################
                 # Select e-greedy action                           #
                 ####################################################
                 if random.random() <= self.epsilon:
                     action = random.choice(self.valid_actions)
+                    kind = 'random'
 
                 else:
                     with torch.no_grad():
                         old_state = torch.from_numpy(old_state.reshape(1, -1)).to(self.device)
                         action = np.argmax(self.estimator(old_state).numpy())
                         old_state = old_state.numpy().reshape(-1)
+                    kind = 'policy'
 
                 ####################################################
                 # Env step and store experience in replay memory   #
@@ -178,7 +187,7 @@ class Agent:
                 episode_history.append(transition(old_state, action,
                     reward, new_state, done))
 
-                episode_reward += reward
+                episode_rewards.append(reward)
                 episode_steps += 1
                 self.steps += 1
 
@@ -218,6 +227,13 @@ class Agent:
 
                 old_state = new_state
 
+                # Tensorboard
+                self.writer.add_scalar('Transition/reward', reward, self.steps)
+                self.writer.add_scalar('Transition/loss', loss, self.steps)
+
+                # Log statistics
+                self.logger.info(f'LOG: episode:{self.episode}, step:{episode_steps}, action:{action}, kind:{kind}, epsilon:{self.epsilon}, reward:{reward}, best_mean_reward:{self.best_reward}, loss:{losses[-1]}')
+
                 if episode_steps >= episode_length:
                     break
 
@@ -225,14 +241,17 @@ class Agent:
             self.epsilon *= self.decay
             self.epsilon = max(self.epsilon, self.epsilon_min)
 
-            train_rewards.append(episode_reward)
+            train_rewards.append(sum(episode_rewards))
             mean_reward = np.mean(train_rewards[-self.best_reward_criteria:])
+
+            self.writer.add_scalar('Episode/epsilon', self.epsilon, self.episode)
+            self.writer.add_scalar('Episode/total_reward', sum(episode_rewards), self.episode)
+            self.writer.add_scalar('Episode/mean_loss', np.mean(losses), self.episode)
+            self.writer.add_histogram('Episode/reward', np.array(episode_rewards), self.episode)
+
             if mean_reward > self.best_reward:
                 self.best_reward = mean_reward
                 self.save_checkpoint(os.path.join('experiments', self.savedir, 'best.pth'))
-
-            # Log statistics
-            self.logger.info(f'LOG: episode:{self.episode}, epsilon:{self.epsilon}, steps:{episode_steps}, reward:{episode_reward}, best_mean_reward:{self.best_reward}, mean_loss:{np.mean(losses)}')
 
             if not self.episode % self.args.checkpoint_every:
                 self.save_checkpoint(os.path.join('experiments', self.args.savedir, 'checkpoint.pth'))
@@ -292,7 +311,6 @@ if __name__ == '__main__':
     parser.add_argument('-emin', '--epsilon_min', type = float, default = 0.05, help = 'minumum value taken by epsilon')
     parser.add_argument('-g', '--gamma', type = float, default = 0.99, help = 'discount factor')
     parser.add_argument('-ue', '--update_every', type = int, default = 500, help = 'number of steps after which to update the target model')
-    parser.add_argument('-re', '--record_every', type = int, default = 500, help = 'number of episodes after which to record an episode')
     parser.add_argument('-ce', '--checkpoint-every', type = int, default = 100, help = 'number of episodes after which to checkpoint')
     parser.add_argument('-r', '--resume', action = 'store_true', help = 'resume from previous checkpoint from save directory')
     parser.add_argument('-bs', '--batch_size', type = int, default = 128, help = 'batch size')
