@@ -22,9 +22,8 @@ transition = namedtuple('transition',
 
 
 class Estimator(nn.Module):
-    def __init__(self, device, ngpu, state_space_dim, action_space_dim):
+    def __init__(self, ngpu, state_space_dim, action_space_dim):
         super(Estimator, self).__init__()
-        self.device = device
         self.ngpu = ngpu
         self.state_space_dim = state_space_dim
         self.action_space_dim = action_space_dim
@@ -89,8 +88,8 @@ class Agent:
         state_shape = env.observation_space.shape
         state_space_dim = state_shape[0] if len(state_shape) == 1 else state_shape
 
-        self.estimator = Estimator(self.device, self.ngpu, state_space_dim, env.action_space.n)
-        self.target = Estimator(self.device, self.ngpu, state_space_dim, env.action_space.n)
+        self.estimator = Estimator(self.ngpu, state_space_dim, env.action_space.n).to(self.device)
+        self.target = Estimator(self.ngpu, state_space_dim, env.action_space.n).to(self.device)
 
         # Optimization
         self.criterion = nn.SmoothL1Loss()
