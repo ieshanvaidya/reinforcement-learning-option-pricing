@@ -358,7 +358,7 @@ if __name__ == '__main__':
         'sigma': 0.01,
         'r': 0,
         'ss': 5,
-        'kappa': 0.1
+        'kappa': 0.1,
         'multiplier': args.trc_multiplier,
         'ticksize': args.trc_ticksize
         }
