@@ -170,8 +170,8 @@ class Agent:
                 else:
                     with torch.no_grad():
                         old_state = torch.from_numpy(old_state.reshape(1, -1)).to(self.device)
-                        action = np.argmax(self.estimator(old_state).numpy())
-                        old_state = old_state.numpy().reshape(-1)
+                        action = np.argmax(self.estimator(old_state).cpu().numpy())
+                        old_state = old_state.cpu().numpy().reshape(-1)
                     kind = 'policy'
 
                 ####################################################
