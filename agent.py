@@ -60,9 +60,8 @@ class Agent:
         #self.record_every = args.record_every
         self.epsilon_min = args.epsilon_min
         self.savedir = args.savedir
-
-        #self.transition = namedtuple('Transition',
-        #    ['old_state', 'action', 'reward', 'new_state', 'done'])
+        self.clip = args.clip
+        self.best_reward_criteria = args.best_reward_criteria
 
         self.best_reward_criteria = 10 # If mean reward over last 'best_reward_critera' > best_reward, save model
 
@@ -135,6 +134,8 @@ class Agent:
             new_state, reward, done, _ = self.env.step(action)
             self.replay_memory.append(transition(old_state, action,
                 reward, new_state, done))
+            reward = np.clip(reward, -self.clip, self.clip)
+
             if done:
                 old_state = self.env.reset()
             else:
@@ -156,12 +157,10 @@ class Agent:
             losses = []
             done = False
             kind = None # Type of action taken
-            step = 0
 
             old_state = self.env.reset()
 
             while not done:
-                step += 1
                 ####################################################
                 # Select e-greedy action                           #
                 ####################################################
@@ -180,6 +179,7 @@ class Agent:
                 # Env step and store experience in replay memory   #
                 ####################################################
                 new_state, reward, done, info = self.env.step(action)
+                reward = np.clip(reward, -self.clip, self.clip)
 
                 self.replay_memory.append(transition(old_state, action,
                     reward, new_state, done))
@@ -321,7 +321,8 @@ if __name__ == '__main__':
     parser.add_argument('-b', '--beta1', type = float, default = 0.9, help = 'beta1')
     parser.add_argument('-cuda', '--cuda', action = 'store_true', help = 'cuda')
     parser.add_argument('-ngpu', '--ngpu', type = int, default = 0, help = 'number of gpu')
-    #parser.add_argument('-clip', '--clip', action = 'store_true', help = 'clip reward')
+    parser.add_argument('-clip', '--clip', type = float, default = np.inf, help = 'cutoff reward between [-clip, clip]')
+    parser.add_argument('-brc', '--best_reward_criteria', type = int, default = 1, help = 'save model if mean reward over last n episodes greater than best rewardwhere n=brc')
 
     args = parser.parse_args()
 
