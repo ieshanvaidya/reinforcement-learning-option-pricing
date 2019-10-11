@@ -310,7 +310,7 @@ if __name__ == '__main__':
     parser.add_argument('--epsilon_min', type = float, default = 0.05, help = 'minumum value taken by epsilon')
     parser.add_argument('--gamma', type = float, default = 0.99, help = 'discount factor')
     parser.add_argument('--update_every', type = int, default = 500, help = 'number of steps after which to update the target model')
-    parser.add_argument('--checkpoint-every', type = int, default = 100, help = 'number of episodes after which to checkpoint')
+    parser.add_argument('--checkpoint_every', type = int, default = 100, help = 'number of episodes after which to checkpoint')
     parser.add_argument('--resume', action = 'store_true', help = 'resume from previous checkpoint from save directory')
     parser.add_argument('--batch_size', type = int, default = 128, help = 'batch size')
     parser.add_argument('--replay_memory_size', type = int, default = 50000, help = 'replay memory size')
