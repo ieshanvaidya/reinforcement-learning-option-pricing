@@ -303,25 +303,27 @@ class Agent:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-ne', '--n_episodes', type = int, default = 100, help = 'number of episodes to train')
-    parser.add_argument('-el', '--episode_length', type = int, default = 1000, help = 'maximum episode length')
-    parser.add_argument('-e', '--epsilon', type = float, default = 1, help = 'e-greedy probability')
-    parser.add_argument('-d', '--decay', type = float, default = 0.99, help = 'decay of epsilon per episode')
-    parser.add_argument('-emin', '--epsilon_min', type = float, default = 0.05, help = 'minumum value taken by epsilon')
-    parser.add_argument('-g', '--gamma', type = float, default = 0.99, help = 'discount factor')
-    parser.add_argument('-ue', '--update_every', type = int, default = 500, help = 'number of steps after which to update the target model')
-    parser.add_argument('-ce', '--checkpoint-every', type = int, default = 100, help = 'number of episodes after which to checkpoint')
-    parser.add_argument('-r', '--resume', action = 'store_true', help = 'resume from previous checkpoint from save directory')
-    parser.add_argument('-bs', '--batch_size', type = int, default = 128, help = 'batch size')
-    parser.add_argument('-rms', '--replay_memory_size', type = int, default = 50000, help = 'replay memory size')
-    parser.add_argument('-s', '--seed', type = int, help = 'random seed')
-    parser.add_argument('-sd', '--savedir', type = str, help = 'save directory')
-    parser.add_argument('-lr', '--lr', type = float, default = 0.001, help = 'learning rate')
-    parser.add_argument('-b', '--beta1', type = float, default = 0.9, help = 'beta1')
-    parser.add_argument('-cuda', '--cuda', action = 'store_true', help = 'cuda')
-    parser.add_argument('-ngpu', '--ngpu', type = int, default = 0, help = 'number of gpu')
-    parser.add_argument('-clip', '--clip', type = float, default = np.inf, help = 'cutoff reward between [-clip, clip]')
-    parser.add_argument('-brc', '--best_reward_criteria', type = int, default = 1, help = 'save model if mean reward over last n episodes greater than best rewardwhere n=brc')
+    parser.add_argument('--n_episodes', type = int, default = 100, help = 'number of episodes to train')
+    parser.add_argument('--episode_length', type = int, default = 1000, help = 'maximum episode length')
+    parser.add_argument('--epsilon', type = float, default = 1, help = 'e-greedy probability')
+    parser.add_argument('--decay', type = float, default = 0.99, help = 'decay of epsilon per episode')
+    parser.add_argument('--epsilon_min', type = float, default = 0.05, help = 'minumum value taken by epsilon')
+    parser.add_argument('--gamma', type = float, default = 0.99, help = 'discount factor')
+    parser.add_argument('--update_every', type = int, default = 500, help = 'number of steps after which to update the target model')
+    parser.add_argument('--checkpoint-every', type = int, default = 100, help = 'number of episodes after which to checkpoint')
+    parser.add_argument('--resume', action = 'store_true', help = 'resume from previous checkpoint from save directory')
+    parser.add_argument('--batch_size', type = int, default = 128, help = 'batch size')
+    parser.add_argument('--replay_memory_size', type = int, default = 50000, help = 'replay memory size')
+    parser.add_argument('--seed', type = int, help = 'random seed')
+    parser.add_argument('--savedir', type = str, help = 'save directory')
+    parser.add_argument('--lr', type = float, default = 0.001, help = 'learning rate')
+    parser.add_argument('--beta1', type = float, default = 0.9, help = 'beta1')
+    parser.add_argument('--cuda', action = 'store_true', help = 'cuda')
+    parser.add_argument('--ngpu', type = int, default = 0, help = 'number of gpu')
+    parser.add_argument('--clip', type = float, default = np.inf, help = 'cutoff reward between [-clip, clip]')
+    parser.add_argument('--best_reward_criteria', type = int, default = 1, help = 'save model if mean reward over last n episodes greater than best rewardwhere n=brc')
+    parser.add_argument('--trc_multiplier', type = float, default = 1, help = 'transaction cost multiplier')
+    parser.add_argument('--trc_ticksize', type = float, default = 0.1, help = 'transaction cost ticksize')
 
     args = parser.parse_args()
 
@@ -357,6 +359,8 @@ if __name__ == '__main__':
         'r': 0,
         'ss': 5,
         'kappa': 0.1
+        'multiplier': args.trc_multiplier,
+        'ticksize': args.trc_ticksize
         }
     env = OptionPricingEnv()
     env.configure(**config)

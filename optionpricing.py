@@ -106,7 +106,7 @@ class OptionPricingEnv:
         delta, gamma = compute_greeks(self.S, self.K, self.t, self.r, self.sigma)
         return delta
 
-    def configure(self, S, T, L, m, n, K, D, mu, sigma, r, ss, kappa):
+    def configure(self, S, T, L, m, n, K, D, mu, sigma, r, ss, kappa, multiplier, ticksize):
         self.S = S
         self.T = T
         self.L = L
@@ -119,6 +119,8 @@ class OptionPricingEnv:
         self.r = r
         self.ss = ss
         self.kappa = kappa
+        self.multiplier = multiplier
+        self.ticksize = ticksize
 
         self.S0 = S
         self.cash = 0
@@ -191,16 +193,12 @@ class OptionPricingEnv:
 
         self.steps -= 1
 
-        ticksize = 0.1
-        multiplier = 1
-        cost = multiplier * ticksize * (abs(num_stocks) + 0.01 * num_stocks ** 2)
+        cost = self.multiplier * self.ticksize * (abs(num_stocks) + 0.01 * num_stocks ** 2)
         self.cash -= cost
 
         pnl = compute_pnl(init_portfolio, self.portfolio, self.trading_cost)
 
         reward = 0.01 * (pnl - 0.5 * self.kappa * (pnl ** 2) - cost)
-        #reward = min(pnl - 0.5 * self.kappa * (pnl ** 2) - cost, 100)
-        #reward = max(reward, -100)
 
         info = {'call': np.array(calls), 'delta': np.array(deltas), 'gamma': np.array(gammas)}
 
