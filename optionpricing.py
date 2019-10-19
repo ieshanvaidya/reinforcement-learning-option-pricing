@@ -198,9 +198,9 @@ class OptionPricingEnv:
 
         pnl = compute_pnl(init_portfolio, self.portfolio, self.trading_cost)
 
-        reward = 0.01 * (pnl - 0.5 * self.kappa * (pnl ** 2) - cost)
+        reward = (pnl - 0.5 * self.kappa * (pnl ** 2) - cost)
 
-        info = {'call': np.array(calls), 'delta': np.array(deltas), 'gamma': np.array(gammas)}
+        info = {'pnl': pnl, 'dn': self.action_map[action], 'call': np.array(calls), 'delta': np.array(deltas), 'gamma': np.array(gammas)}
 
         self.done = self.steps == 0
 
