@@ -81,7 +81,6 @@ class OptionPricingEnv:
         self.trading_days = 252
         self.day = 24 / self.trading_days # 24 hours
         self.lots = 1
-        self.trading_cost = 0
 
         self.configured = False
 
@@ -196,7 +195,7 @@ class OptionPricingEnv:
         cost = self.multiplier * self.ticksize * (abs(num_stocks) + 0.01 * num_stocks ** 2)
         self.cash -= cost
 
-        pnl = compute_pnl(init_portfolio, self.portfolio, self.trading_cost)
+        pnl = compute_pnl(init_portfolio, self.portfolio, 0)
 
         reward = (pnl - 0.5 * self.kappa * (pnl ** 2) - cost)
 
