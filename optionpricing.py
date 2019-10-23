@@ -31,11 +31,11 @@ def compute_greeks(S, K, t, r, sigma):
 
     return delta, gamma
 
-def compute_pnl(init_portfolio, final_portfolio, transaction_cost):
+def compute_pnl(init_portfolio, final_portfolio):
     init_wealth = compute_wealth(init_portfolio)
     final_wealth = compute_wealth(final_portfolio)
 
-    return final_wealth - init_wealth - transaction_cost
+    return final_wealth - init_wealth
 
 
 def compute_wealth(portfolio):
@@ -150,7 +150,7 @@ class OptionPricingEnv:
 
     def step(self, action, stock_prices = None):
         """
-        stock_prices: for deterministic evolution | list type even if single entry
+        stock_prices: for deterministic evolution | dtype: list (even if single entry)
         """
         if not self.configured:
             raise NotImplementedError('Environment not configured')
@@ -188,16 +188,15 @@ class OptionPricingEnv:
             gammas.append(gamma)
 
             states.append([self.S / self.S0, self.t, self.n / self.high])
-            #states.append([self.S, self.t, self.n])
 
         self.steps -= 1
 
         cost = self.multiplier * self.ticksize * (abs(num_stocks) + 0.01 * num_stocks ** 2)
         self.cash -= cost
 
-        pnl = compute_pnl(init_portfolio, self.portfolio, 0)
+        pnl = compute_pnl(init_portfolio, self.portfolio)
 
-        reward = (pnl - 0.5 * self.kappa * (pnl ** 2) - cost)
+        reward = (pnl - 0.5 * self.kappa * (pnl ** 2))
 
         info = {'pnl': pnl, 'dn': self.action_map[action], 'call': np.array(calls), 'delta': np.array(deltas), 'gamma': np.array(gammas)}
 
@@ -206,10 +205,8 @@ class OptionPricingEnv:
         return np.array(states[-1], dtype = np.float32), reward, self.done, info
 
     def reset(self):
-        # Should return the state
         self.configure(**self.init_config)
         return np.array([self.S / self.S0, self.t, self.n / self.high], dtype = np.float32)
-        #return np.array([self.S, self.t, self.n])
 
     def render(self):
         pass

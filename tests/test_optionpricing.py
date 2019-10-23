@@ -45,5 +45,5 @@ def test_pnl():
         portfolios.append(portfolio(stock_price, call, nstocks[i], m, 1, cash_pos))
 
     for i in range(1, len(portfolios)):
-        pnl = compute_pnl(portfolios[i - 1], portfolios[i], 0)
+        pnl = compute_pnl(portfolios[i - 1], portfolios[i])
         assert pytest.approx(pnl, abs = 0.0001) == pnls[i - 1]

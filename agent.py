@@ -160,6 +160,10 @@ class Agent:
             old_state = self.env.reset()
 
             while not done:
+                delta = self.env.delta
+                stock_price = self.env.S
+                call = self.env.call
+
                 ####################################################
                 # Select e-greedy action                           #
                 ####################################################
@@ -231,7 +235,7 @@ class Agent:
                 self.writer.add_scalar('Transition/loss', loss, self.steps)
 
                 # Log statistics
-                self.logger.info(f'LOG: episode:{self.episode}, step:{episode_steps}, S:{self.env.S}, c:{self.env.call}, delta:{self.env.delta}, n:{self.env.n}, action:{action}, dn:{info["dn"]} , kind:{kind}, epsilon:{self.epsilon}, pnl:{info["pnl"]}, reward:{reward}, best_mean_reward:{self.best_reward}, loss:{losses[-1]}')
+                self.logger.info(f'LOG: episode:{self.episode}, step:{episode_steps}, S:{stock_price}, c:{call}, delta:{delta}, n:{self.env.n}, action:{action}, dn:{info["dn"]} , kind:{kind}, epsilon:{self.epsilon}, pnl:{info["pnl"]}, reward:{reward}, best_mean_reward:{self.best_reward}, loss:{losses[-1]}')
 
                 if episode_steps >= episode_length:
                     break
@@ -303,7 +307,7 @@ class Agent:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--n_episodes', type = int, default = 100, help = 'number of episodes to train')
+    parser.add_argument('--n_episodes', type = int, default = 1000, help = 'number of episodes to train')
     parser.add_argument('--episode_length', type = int, default = 1000, help = 'maximum episode length')
     parser.add_argument('--epsilon', type = float, default = 1, help = 'e-greedy probability')
     parser.add_argument('--decay', type = float, default = 0.999, help = 'decay of epsilon per episode')
@@ -367,4 +371,3 @@ if __name__ == '__main__':
 
     agent = Agent(env, args)
     agent.train(args.n_episodes, args.episode_length)
-    #agent.simulate()
