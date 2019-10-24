@@ -309,7 +309,7 @@ class Agent:
                 call = self.env.call
                 step += 1
                 with torch.no_grad():
-                    action = np.argmax(self.estimator(state).numpy())
+                    action = np.argmax(self.estimator(state).cpu().numpy())
 
                 if validate:
                     state, reward, done, info = self.env.step(action, self.validation_prices[i][step - 1])
