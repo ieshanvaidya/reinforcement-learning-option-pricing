@@ -16,6 +16,14 @@ import yaml
 import csv
 from optionpricing import *
 
+
+########################################################################
+########################## THINGS TO FIX ###############################
+########################################################################
+## 1. Reproducibility | fix random seed and resume ability            ##
+########################################################################
+
+
 # Defining transition namedtuple here rather than within the class to ensure pickle functionality
 transition = namedtuple('transition',
             ['old_state', 'action', 'reward', 'new_state', 'done'])
@@ -56,13 +64,10 @@ class Agent:
         self.batch_size = args.batch_size
         self.replay_memory_size = args.replay_memory_size
         self.update_every = args.update_every
-        #self.record_every = args.record_every
         self.epsilon_min = args.epsilon_min
         self.savedir = args.savedir
         self.clip = args.clip
-        self.best_reward_criteria = args.best_reward_criteria
-
-        self.best_reward_criteria = 10 # If mean reward over last 'best_reward_critera' > best_reward, save model
+        self.best_reward_criteria = args.best_reward_criteria # If mean reward over last 'best_reward_critera' > best_reward, save model
 
         # Get valid actions
         try:
@@ -71,13 +76,21 @@ class Agent:
             print(f'Action space is not Discrete, {e}')
 
         # Logging
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
+        self.train_logger = logging.getLogger('train')
+        self.train_logger.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s, %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
         file_handler = logging.FileHandler(os.path.join('experiments', args.savedir, 'training.log'))
         file_handler.setFormatter(formatter)
-        self.logger.addHandler(file_handler)
-        self.logger.propagate = False
+        self.train_logger.addHandler(file_handler)
+        self.train_logger.propagate = False
+
+        self.val_logger = logging.getLogger('validation')
+        self.val_logger.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s, %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
+        file_handler = logging.FileHandler(os.path.join('experiments', args.savedir, 'validation.log'))
+        file_handler.setFormatter(formatter)
+        self.val_logger.addHandler(file_handler)
+        self.val_logger.propagate = False
 
         # Tensorboard
         self.writer = SummaryWriter(log_dir = os.path.join('experiments', self.savedir), flush_secs = 5)
@@ -98,12 +111,14 @@ class Agent:
         if args.resume:
             try:
                 self.load_checkpoint(os.path.join('experiments', args.savedir, 'checkpoint.pth'))
-                self.logger.info(f'INFO: Resuming from checkpoint; episode: {self.episode}')
+                self.train_logger.info(f'INFO: Resuming from checkpoint; episode: {self.episode}')
             except FileNotFoundError:
                 print('Checkpoint not found')
 
         else:
             self.replay_memory = deque(maxlen = args.replay_memory_size)
+
+            self.generate_validation_prices(10000)
 
             # Initialize replay memory
             self.initialize_replay_memory(self.batch_size)
@@ -122,7 +137,7 @@ class Agent:
         Populate replay memory with initial experience
         """
         if self.replay_memory:
-            self.logger.info('INFO: Replay memory already initialized')
+            self.train_logger.info('INFO: Replay memory already initialized')
             return
 
         assert size >= self.batch_size, "Initialize with size >= batch size"
@@ -140,7 +155,25 @@ class Agent:
             else:
                 old_state = new_state
 
-        self.logger.info(f'INFO: Replay memory initialized with {size} experiences')
+        self.train_logger.info(f'INFO: Replay memory initialized with {size} experiences')
+
+
+    def generate_validation_prices(self, n):
+        self.validation_prices = {}
+        for i in range(1, n + 1):
+            S = self.env.S0
+            prices = []
+
+            for step in range(self.env.D * self.env.T):
+                stochastic_prices = []
+                for stochastic in range(self.env.ss):
+                    ds = self.env.mu * S * self.env.dt + self.env.sigma * S * np.random.normal() * np.sqrt(self.env.dt)
+                    S = S + ds
+                    stochastic_prices.append(S)
+                prices.append(stochastic_prices)
+
+            self.validation_prices[i] = prices
+
 
     def train(self, n_episodes, episode_length):
         """
@@ -149,6 +182,7 @@ class Agent:
         train_rewards = []
 
         for episode in tqdm(range(n_episodes)):
+            self.estimator.train()
             self.episode += 1
             episode_rewards = []
             episode_steps = 0
@@ -207,9 +241,6 @@ class Agent:
                 is_not_done = torch.from_numpy(np.logical_not(is_done)).to(self.device)
                 actions = torch.from_numpy(actions).long().to(self.device)
 
-                # Q_old = reward + discount * max[over actions](Q_new)
-                # Old Q value = reward + discounted Q value of new state
-
                 with torch.no_grad():
                     q_target = self.target(new_states)
                     max_q, _ = torch.max(q_target, dim = 1)
@@ -235,7 +266,7 @@ class Agent:
                 self.writer.add_scalar('Transition/loss', loss, self.steps)
 
                 # Log statistics
-                self.logger.info(f'LOG: episode:{self.episode}, step:{episode_steps}, S:{stock_price}, c:{call}, delta:{delta}, n:{self.env.n}, action:{action}, dn:{info["dn"]} , kind:{kind}, epsilon:{self.epsilon}, pnl:{info["pnl"]}, reward:{reward}, best_mean_reward:{self.best_reward}, loss:{losses[-1]}')
+                self.train_logger.info(f'LOG: episode:{self.episode}, step:{episode_steps}, S:{stock_price}, c:{call}, delta:{delta}, n:{self.env.n}, action:{action}, dn:{info["dn"]} , kind:{kind}, epsilon:{self.epsilon}, pnl:{info["pnl"]}, reward:{reward}, best_mean_reward:{self.best_reward}, loss:{losses[-1]}')
 
                 if episode_steps >= episode_length:
                     break
@@ -259,20 +290,36 @@ class Agent:
             if not self.episode % self.args.checkpoint_every:
                 self.save_checkpoint(os.path.join('experiments', self.args.savedir, 'checkpoint.pth'))
 
-    def simulate(self):
-        """
-        Simulation of one episode
-        """
-        state = self.env.reset().reshape(1, -1).to(self.device)
-        done = False
-        while not done:
-            self.env.render() # To be implemented
-            action = np.argmax(self.estimator(state).item())
-            state, reward, done, info = self.env.step(action)
-            state = state.reshape(1, -1).to(self.device)
+            if not self.episode % self.args.validate_every:
+                self.simulate(n = 1000, validate = True)
 
-        self.env.close() # To be implemented
 
+    def simulate(self, n = 1, validate = False):
+        """
+        Simulate episode
+        """
+        self.estimator.eval()
+        for i in range(1, n + 1):
+            state = torch.from_numpy(self.env.reset()).to(self.device)
+            done = False
+            step = 0
+            while not done:
+                delta = self.env.delta
+                stock_price = self.env.S
+                call = self.env.call
+                step += 1
+                with torch.no_grad():
+                    action = np.argmax(self.estimator(state).numpy())
+
+                if validate:
+                    state, reward, done, info = self.env.step(action, self.validation_prices[i][step - 1])
+                else:
+                    state, reward, done, info = self.env.step(action)
+
+                if validate:
+                    self.val_logger.info(f'LOG: train_episode:{self.episode}, val_episode:{i}, step:{step}, S:{stock_price}, c:{call}, delta:{delta}, n:{self.env.n}, action:{action}, dn:{info["dn"]} , kind:policy, epsilon:0, pnl:{info["pnl"]}, reward:{reward}, best_mean_reward:{np.nan}, loss:{np.nan}')
+
+                state = torch.from_numpy(state).to(self.device)
 
     def save_checkpoint(self, path):
         checkpoint = {
@@ -313,8 +360,8 @@ if __name__ == '__main__':
     parser.add_argument('--decay', type = float, default = 0.999, help = 'decay of epsilon per episode')
     parser.add_argument('--epsilon_min', type = float, default = 0.005, help = 'minumum value taken by epsilon')
     parser.add_argument('--gamma', type = float, default = 0.3, help = 'discount factor')
-    parser.add_argument('--update_every', type = int, default = 500, help = 'number of steps after which to update the target model')
-    parser.add_argument('--checkpoint_every', type = int, default = 100, help = 'number of episodes after which to checkpoint')
+    parser.add_argument('--update_every', type = int, default = 500, help = 'update target model every [_] steps')
+    parser.add_argument('--checkpoint_every', type = int, default = 100, help = 'checkpoint model every [_] steps')
     parser.add_argument('--resume', action = 'store_true', help = 'resume from previous checkpoint from save directory')
     parser.add_argument('--batch_size', type = int, default = 128, help = 'batch size')
     parser.add_argument('--replay_memory_size', type = int, default = 64000, help = 'replay memory size')
@@ -325,9 +372,10 @@ if __name__ == '__main__':
     parser.add_argument('--cuda', action = 'store_true', help = 'cuda')
     parser.add_argument('--ngpu', type = int, default = 0, help = 'number of gpu')
     parser.add_argument('--clip', type = float, default = np.inf, help = 'cutoff reward between [-clip, clip]')
-    parser.add_argument('--best_reward_criteria', type = int, default = 10, help = 'save model if mean reward over last n episodes greater than best rewardwhere n=brc')
+    parser.add_argument('--best_reward_criteria', type = int, default = 10, help = 'save model if mean reward over last [_] episodes greater than best reward')
     parser.add_argument('--trc_multiplier', type = float, default = 1, help = 'transaction cost multiplier')
     parser.add_argument('--trc_ticksize', type = float, default = 0.1, help = 'transaction cost ticksize')
+    parser.add_argument('--validate_every', type = int, default = 10, help = 'perform validation every [_] steps')
 
     args = parser.parse_args()
 
