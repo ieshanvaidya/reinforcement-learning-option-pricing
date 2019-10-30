@@ -371,11 +371,13 @@ if __name__ == '__main__':
     parser.add_argument('--beta1', type = float, default = 0.9, help = 'beta1')
     parser.add_argument('--cuda', action = 'store_true', help = 'cuda')
     parser.add_argument('--ngpu', type = int, default = 0, help = 'number of gpu')
-    parser.add_argument('--clip', type = float, default = np.inf, help = 'cutoff reward between [-clip, clip]')
+    parser.add_argument('--clip', type = float, default = np.inf, help = 'clip reward [-clip, clip]')
+    parser.add_argument('--clip_low', type = float, default = 1, help = 'lower bound for pnl | bound is - R_max / clip where R_max is 1 / kappa (max of utility function) | clip = 0 ==> -infinity')
+    parser.add_argument('--clip_high', type = float, default = 1, help = 'upper bound for pnl | bound is R_max / clip where R_max is 1 / kappa (max of utility function) | clip = 0 ==> infinity')
     parser.add_argument('--best_reward_criteria', type = int, default = 10, help = 'save model if mean reward over last [_] episodes greater than best reward')
     parser.add_argument('--trc_multiplier', type = float, default = 1, help = 'transaction cost multiplier')
     parser.add_argument('--trc_ticksize', type = float, default = 0.1, help = 'transaction cost ticksize')
-    parser.add_argument('--validate_every', type = int, default = 10, help = 'perform validation every [_] steps')
+    parser.add_argument('--validate_every', type = int, default = 1000, help = 'perform validation every [_] steps')
 
     args = parser.parse_args()
 
@@ -412,7 +414,9 @@ if __name__ == '__main__':
         'ss': 5,
         'kappa': 0.1,
         'multiplier': args.trc_multiplier,
-        'ticksize': args.trc_ticksize
+        'ticksize': args.trc_ticksize,
+        'clip_low': args.clip_low,
+        'clip_high': args.clip_high
         }
     env = OptionPricingEnv()
     env.configure(**config)
