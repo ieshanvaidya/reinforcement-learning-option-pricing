@@ -333,7 +333,8 @@ class Agent:
             'random_state': random.getstate(),
             'numpy_random_state': np.random.get_state(),
             'torch_random_state': torch.get_rng_state(),
-            'best_reward': self.best_reward
+            'best_reward': self.best_reward,
+            'validation_prices': self.validation_prices
         }
         torch.save(checkpoint, path)
 
@@ -350,6 +351,7 @@ class Agent:
         np.random.set_state(checkpoint['numpy_random_state'])
         torch.set_rng_state(checkpoint['torch_random_state'])
         self.best_reward = checkpoint['best_reward']
+        self.validation_prices = checkpoint['validation_prices']
 
 
 if __name__ == '__main__':
