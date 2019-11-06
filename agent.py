@@ -373,7 +373,7 @@ if __name__ == '__main__':
     parser.add_argument('--beta1', type = float, default = 0.9, help = 'beta1')
     parser.add_argument('--cuda', action = 'store_true', help = 'cuda')
     parser.add_argument('--ngpu', type = int, default = 0, help = 'number of gpu')
-    parser.add_argument('--clip', type = float, default = np.inf, help = 'clip reward [-clip, clip]')
+    parser.add_argument('--clip', type = float, default = 100, help = 'clip reward [-clip, clip]')
     parser.add_argument('--clip_low', type = float, default = 0, help = 'lower bound for pnl | bound is - R_max / clip where R_max is 1 / kappa (max of utility function) | clip = 0 ==> -infinity')
     parser.add_argument('--clip_high', type = float, default = 0, help = 'upper bound for pnl | bound is R_max / clip where R_max is 1 / kappa (max of utility function) | clip = 0 ==> infinity')
     parser.add_argument('--best_reward_criteria', type = int, default = 10, help = 'save model if mean reward over last [_] episodes greater than best reward')
