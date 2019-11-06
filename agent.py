@@ -266,7 +266,7 @@ class Agent:
                 self.writer.add_scalar('Transition/loss', loss, self.steps)
 
                 # Log statistics
-                self.train_logger.info(f'LOG: episode:{self.episode}, step:{episode_steps}, S:{stock_price}, c:{call}, delta:{delta}, n:{self.env.n}, action:{action}, dn:{info["dn"]} , kind:{kind}, epsilon:{self.epsilon}, pnl:{info["pnl"]}, reward:{reward}, best_mean_reward:{self.best_reward}, loss:{losses[-1]}')
+                self.train_logger.info(f'LOG: episode:{self.episode}, step:{episode_steps}, K:{self.env.K}, T:{self.env.T}, S:{stock_price}, c:{call}, delta:{delta}, n:{self.env.n}, action:{action}, dn:{info["dn"]} , kind:{kind}, epsilon:{self.epsilon}, pnl:{info["pnl"]}, reward:{reward}, best_mean_reward:{self.best_reward}, loss:{losses[-1]}')
 
                 if episode_steps >= episode_length:
                     break
@@ -408,7 +408,7 @@ if __name__ == '__main__':
         'L': 1,
         'm': 100, # L options for m stocks
         'n': 0,
-        'K': 100,
+        'K': [95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105],
         'D': 5,
         'mu': 0,
         'sigma': 0.01,
@@ -420,8 +420,8 @@ if __name__ == '__main__':
         'clip_low': args.clip_low,
         'clip_high': args.clip_high
         }
-    env = OptionPricingEnv()
-    env.configure(**config)
+    env = OptionPricingEnv(config)
+    env.configure()
 
     agent = Agent(env, args)
     agent.train(args.n_episodes, args.episode_length)

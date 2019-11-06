@@ -1,9 +1,9 @@
 import gym
 from gym import error, spaces, utils
 import numpy as np
+import random
 from scipy.stats import norm
 from collections import namedtuple
-
 
 def compute_call(S, K, t, r, sigma):
     if np.isclose(t, 0):
@@ -47,7 +47,7 @@ def compute_wealth(portfolio):
 
 
 class OptionPricingEnv:
-    def __init__(self):
+    def __init__(self, config):
         """
         S: stock price
         T: days to maturity
@@ -61,6 +61,8 @@ class OptionPricingEnv:
         r: risk free rate
         ss: number of steps between trading periods
         kappa: risk aversion
+        """
+        self.config = config
         """
         # Portfolio
         self.S = None
@@ -77,6 +79,7 @@ class OptionPricingEnv:
 
         # Optimization
         self.kappa = None
+        """
 
         self.trading_days = 252
         self.day = 24 / self.trading_days # 24 hours
@@ -105,21 +108,32 @@ class OptionPricingEnv:
         delta, gamma = compute_greeks(self.S, self.K, self.t, self.r, self.sigma)
         return delta
 
-    def configure(self, S, T, L, m, n, K, D, mu, sigma, r, ss, kappa, multiplier, ticksize, clip_low, clip_high):
-        self.S = S
-        self.T = T
-        self.L = L
-        self.m = m
-        self.n = n
-        self.K = K
-        self.D = D
-        self.mu = mu
-        self.sigma = sigma * np.sqrt(self.trading_days) # Converting sigma/day to sigma/year
-        self.r = r
-        self.ss = ss
-        self.kappa = kappa
-        self.multiplier = multiplier
-        self.ticksize = ticksize
+    def configure(self):#, S, T, L, m, n, K, D, mu, sigma, r, ss, kappa, multiplier, ticksize, clip_low, clip_high):
+        self.S = self.config['S']
+        try:
+            self.T = random.choice(self.config['T'])
+        except TypeError:
+            self.T = self.config['T']
+
+        self.L = self.config['T']
+        self.m = self.config['m']
+        self.n = self.config['n']
+        try:
+            self.K = random.choice(self.config['K'])
+        except TypeError:
+            self.K = self.config['K']
+
+        #self.K = K
+        self.D = self.config['D']
+        self.mu = self.config['mu']
+        self.sigma = self.config['sigma'] * np.sqrt(self.trading_days) # Converting sigma/day to sigma/year
+        self.r = self.config['r']
+        self.ss = self.config['ss']
+        self.kappa = self.config['kappa']
+        self.multiplier = self.config['multiplier']
+        self.ticksize = self.config['ticksize']
+        clip_low = self.config['clip_low']
+        clip_high = self.config['clip_high']
 
         if clip_low == 0:
             self.clip_low = -np.inf
@@ -133,14 +147,14 @@ class OptionPricingEnv:
         else:
             self.clip_high = (1 / self.kappa) / clip_high
 
-        self.S0 = S
+        self.S0 = self.S
         self.cash = 0
 
-        self.init_config = {k: v for k, v in locals().items() if k != 'self'}
+        #self.init_config = {k: v for k, v in locals().items() if k != 'self'}
 
         self.t = self.day * self.T
         self.steps = self.T * self.D
-        self.dt = self.day / self.D / ss
+        self.dt = self.day / self.D / self.ss
 
         if not np.isclose(0, (self.t / self.dt) % 1):
             raise ValueError('Mismatch in "time to expiry" and "stochastic time step"')
@@ -217,7 +231,7 @@ class OptionPricingEnv:
         return np.array(states[-1], dtype = np.float32), reward, self.done, info
 
     def reset(self):
-        self.configure(**self.init_config)
+        self.configure()
         return np.array([self.S / self.S0, self.t, self.n / self.high], dtype = np.float32)
 
     def render(self):
