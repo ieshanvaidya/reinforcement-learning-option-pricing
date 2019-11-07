@@ -162,7 +162,6 @@ class OptionPricingEnv:
         h = abs(self.L * self.m)
         l = -h
         num_actions = int((h - l) / self.lots + 1)
-        print(h, l, self.lots, num_actions)
 
         self.high = h
 
