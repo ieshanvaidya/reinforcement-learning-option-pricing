@@ -165,7 +165,7 @@ class OptionPricingEnv:
 
         self.high = h
 
-        self.observation_space = spaces.Box(low = np.array([0, 0, 0, -np.inf]), high = np.array([np.inf, np.inf, np.inf, np.inf]))
+        self.observation_space = spaces.Box(low = np.array([0, 0, -np.inf]), high = np.array([np.inf, np.inf, np.inf]))
         self.action_space = spaces.Discrete(num_actions)
 
         self.action_map = {i: int(l + i * self.lots) for i in range(self.action_space.n)}
@@ -213,7 +213,7 @@ class OptionPricingEnv:
             deltas.append(delta)
             gammas.append(gamma)
 
-            states.append([self.S / self.S0, self.K / self.S0, self.t, self.n / self.high])
+            states.append([self.S / self.S0, self.t, self.n / self.high])#, self.K / self.S0])
 
         self.steps -= 1
 
@@ -232,7 +232,7 @@ class OptionPricingEnv:
 
     def reset(self):
         self.configure()
-        return np.array([self.S / self.S0, self.K / self.S0, self.t, self.n / self.high], dtype = np.float32)
+        return np.array([self.S / self.S0, self.t, self.n / self.high], dtype = np.float32)#), self.K / self.S0], dtype = np.float32)
 
     def render(self):
         pass
