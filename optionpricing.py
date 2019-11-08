@@ -224,7 +224,7 @@ class OptionPricingEnv:
 
         reward = (pnl - 0.5 * self.kappa * (pnl ** 2))
 
-        info = {'pnl': pnl, 'dn': self.action_map[action], 'call': np.array(calls), 'delta': np.array(deltas), 'gamma': np.array(gammas)}
+        info = {'pnl': pnl, 'dn': self.action_map[action], 'call': np.array(calls), 'delta': np.array(deltas), 'gamma': np.array(gammas), 'cost': cost}
 
         self.done = self.steps == 0
 

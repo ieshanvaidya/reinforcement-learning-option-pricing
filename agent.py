@@ -266,7 +266,7 @@ class Agent:
                 self.writer.add_scalar('Transition/loss', loss, self.steps)
 
                 # Log statistics
-                self.train_logger.info(f'LOG: episode:{self.episode}, step:{episode_steps}, K:{self.env.K}, T:{self.env.T}, S:{stock_price}, c:{call}, delta:{delta}, n:{self.env.n}, action:{action}, dn:{info["dn"]} , kind:{kind}, epsilon:{self.epsilon}, pnl:{info["pnl"]}, reward:{reward}, best_mean_reward:{self.best_reward}, loss:{losses[-1]}')
+                self.train_logger.info(f'LOG: episode:{self.episode}, step:{episode_steps}, K:{self.env.K}, T:{self.env.T}, S:{stock_price}, c:{call}, delta:{delta}, n:{self.env.n}, cost:{info["cost"]}, action:{action}, dn:{info["dn"]} , kind:{kind}, epsilon:{self.epsilon}, pnl:{info["pnl"]}, reward:{reward}, best_mean_reward:{self.best_reward}, loss:{losses[-1]}')
 
                 if episode_steps >= episode_length:
                     break
