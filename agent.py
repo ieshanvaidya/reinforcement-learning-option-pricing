@@ -16,14 +16,6 @@ import yaml
 import csv
 from optionpricing import *
 
-
-########################################################################
-########################## THINGS TO FIX ###############################
-########################################################################
-## 1. Reproducibility | fix random seed and resume ability            ##
-########################################################################
-
-
 # Defining transition namedtuple here rather than within the class to ensure pickle functionality
 transition = namedtuple('transition',
             ['old_state', 'action', 'reward', 'new_state', 'done'])
@@ -31,6 +23,13 @@ transition = namedtuple('transition',
 
 class Estimator(nn.Module):
     def __init__(self, ngpu, state_space_dim, action_space_dim):
+        """
+        Estimator class that returns Q-values
+            ngpu: number of gpus
+            state_space_dim: Dimension of the state space
+            action_space_dim: Dimension of the action space
+        """
+
         super(Estimator, self).__init__()
         self.ngpu = ngpu
         self.state_space_dim = state_space_dim
@@ -55,6 +54,11 @@ class Estimator(nn.Module):
 
 class Agent:
     def __init__(self, env, args):
+        """
+        Agent class to train the DQN
+            env: Gym like environment object
+            args: Training arguments | use --help flag to view
+        """
         self.env = env
         self.args = args
 
@@ -66,6 +70,7 @@ class Agent:
         self.update_every = args.update_every
         self.epsilon_min = args.epsilon_min
         self.savedir = args.savedir
+        self.scale = args.scale
         self.clip = args.clip
         self.best_reward_criteria = args.best_reward_criteria # If mean reward over last 'best_reward_critera' > best_reward, save model
 
@@ -84,14 +89,6 @@ class Agent:
         self.train_logger.addHandler(file_handler)
         self.train_logger.propagate = False
 
-        self.val_logger = logging.getLogger('validation')
-        self.val_logger.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(asctime)s, %(message)s', datefmt = '%Y-%m-%d %H:%M:%S')
-        file_handler = logging.FileHandler(os.path.join('experiments', args.savedir, 'validation.log'))
-        file_handler.setFormatter(formatter)
-        self.val_logger.addHandler(file_handler)
-        self.val_logger.propagate = False
-
         # Tensorboard
         self.writer = SummaryWriter(log_dir = os.path.join('experiments', self.savedir), flush_secs = 5)
 
@@ -108,9 +105,10 @@ class Agent:
         self.criterion = nn.SmoothL1Loss(reduction = 'mean')
         self.optimizer = optim.Adam(self.estimator.parameters(), lr = args.lr, betas = (args.beta1, 0.999))
 
+        # If resume, load from checkpoint | otherwise initialize
         if args.resume:
             try:
-                self.load_checkpoint(os.path.join('experiments', args.savedir, 'checkpoint.pth'))
+                self.load_checkpoint(os.path.join('experiments', args.savedir, 'checkpoint.pt'))
                 self.train_logger.info(f'INFO: Resuming from checkpoint; episode: {self.episode}')
             except FileNotFoundError:
                 print('Checkpoint not found')
@@ -118,23 +116,22 @@ class Agent:
         else:
             self.replay_memory = deque(maxlen = args.replay_memory_size)
 
-            self.generate_validation_prices(10000)
-
             # Initialize replay memory
             self.initialize_replay_memory(self.batch_size)
 
-            # Copy estimator state_dict to target
+            # Set target = estimator
             self.target.load_state_dict(self.estimator.state_dict())
 
             # Training details
             self.episode = 0
             self.steps = 0
-            self.best_reward = -np.inf
+            self.best_reward = -self.clip * self.env.T * self.env.D
 
 
     def initialize_replay_memory(self, size):
         """
         Populate replay memory with initial experience
+            size: Number of experiences to initialize (must be >= batch_size)
         """
         if self.replay_memory:
             self.train_logger.info('INFO: Replay memory already initialized')
@@ -146,9 +143,9 @@ class Agent:
         for i in range(size):
             action = random.choice(self.valid_actions)
             new_state, reward, done, _ = self.env.step(action)
+            reward = np.clip(self.scale * reward, -self.clip, self.clip)
             self.replay_memory.append(transition(old_state, action,
                 reward, new_state, done))
-            reward = np.clip(reward, -self.clip, self.clip)
 
             if done:
                 old_state = self.env.reset()
@@ -156,23 +153,6 @@ class Agent:
                 old_state = new_state
 
         self.train_logger.info(f'INFO: Replay memory initialized with {size} experiences')
-
-
-    def generate_validation_prices(self, n):
-        self.validation_prices = {}
-        for i in range(1, n + 1):
-            S = self.env.S0
-            prices = []
-
-            for step in range(self.env.D * self.env.T):
-                stochastic_prices = []
-                for stochastic in range(self.env.ss):
-                    ds = self.env.mu * S * self.env.dt + self.env.sigma * S * np.random.normal() * np.sqrt(self.env.dt)
-                    S = S + ds
-                    stochastic_prices.append(S)
-                prices.append(stochastic_prices)
-
-            self.validation_prices[i] = prices
 
 
     def train(self, n_episodes, episode_length):
@@ -216,7 +196,7 @@ class Agent:
                 # Env step and store experience in replay memory   #
                 ####################################################
                 new_state, reward, done, info = self.env.step(action)
-                reward = np.clip(reward, -self.clip, self.clip)
+                reward = np.clip(self.scale * reward, -self.clip, self.clip)
 
                 self.replay_memory.append(transition(old_state, action,
                     reward, new_state, done))
@@ -266,7 +246,7 @@ class Agent:
                 self.writer.add_scalar('Transition/loss', loss, self.steps)
 
                 # Log statistics
-                self.train_logger.info(f'LOG: episode:{self.episode}, step:{episode_steps}, K:{self.env.K}, T:{self.env.T}, S:{stock_price}, c:{call}, delta:{delta}, n:{self.env.n}, cost:{info["cost"]}, action:{action}, dn:{info["dn"]} , kind:{kind}, epsilon:{self.epsilon}, pnl:{info["pnl"]}, reward:{reward}, best_mean_reward:{self.best_reward}, loss:{losses[-1]}')
+                self.train_logger.info(f'LOG: episode:{self.episode}, step:{episode_steps}, action:{action}, kind:{kind}, reward:{reward}, best_mean_reward:{self.best_reward}, loss:{losses[-1]}, epsilon:{self.epsilon}, S:{stock_price}, c:{call}, delta:{delta}, n:{self.env.n}, dn:{info["dn"]}, cost:{info["cost"]}, pnl:{info["pnl"]}, K:{self.env.K}, T:{self.env.T}')
 
                 if episode_steps >= episode_length:
                     break
@@ -285,43 +265,17 @@ class Agent:
 
             if mean_reward > self.best_reward:
                 self.best_reward = mean_reward
-                self.save_checkpoint(os.path.join('experiments', self.savedir, 'best.pth'))
+                self.save_checkpoint(os.path.join('experiments', self.savedir, 'best.pt'))
 
             if not self.episode % self.args.checkpoint_every:
-                self.save_checkpoint(os.path.join('experiments', self.args.savedir, 'checkpoint.pth'))
+                self.save_checkpoint(os.path.join('experiments', self.args.savedir, 'checkpoint.pt'))
 
-            if not self.episode % self.args.validate_every:
-                self.simulate(n = 1000, validate = True)
-
-
-    def simulate(self, n = 1, validate = False):
-        """
-        Simulate episode
-        """
-        self.estimator.eval()
-        for i in range(1, n + 1):
-            state = torch.from_numpy(self.env.reset()).to(self.device)
-            done = False
-            step = 0
-            while not done:
-                delta = self.env.delta
-                stock_price = self.env.S
-                call = self.env.call
-                step += 1
-                with torch.no_grad():
-                    action = np.argmax(self.estimator(state).cpu().numpy())
-
-                if validate:
-                    state, reward, done, info = self.env.step(action, self.validation_prices[i][step - 1])
-                else:
-                    state, reward, done, info = self.env.step(action)
-
-                if validate:
-                    self.val_logger.info(f'LOG: train_episode:{self.episode}, val_episode:{i}, step:{step}, S:{stock_price}, c:{call}, delta:{delta}, n:{self.env.n}, action:{action}, dn:{info["dn"]} , kind:policy, epsilon:0, pnl:{info["pnl"]}, reward:{reward}, best_mean_reward:{np.nan}, loss:{np.nan}')
-
-                state = torch.from_numpy(state).to(self.device)
 
     def save_checkpoint(self, path):
+        """
+        Checkpoint the model
+            path: Save path
+        """
         checkpoint = {
             'episode': self.episode,
             'steps': self.steps,
@@ -333,12 +287,15 @@ class Agent:
             'random_state': random.getstate(),
             'numpy_random_state': np.random.get_state(),
             'torch_random_state': torch.get_rng_state(),
-            'best_reward': self.best_reward,
-            'validation_prices': self.validation_prices
+            'best_reward': self.best_reward
         }
         torch.save(checkpoint, path)
 
     def load_checkpoint(self, path):
+        """
+        Load checkpoint
+            path: Checkpoint (checkpoint.pt) path
+        """
         checkpoint = torch.load(path)
         self.episode = checkpoint['episode']
         self.steps = checkpoint['steps']
@@ -351,7 +308,6 @@ class Agent:
         np.random.set_state(checkpoint['numpy_random_state'])
         torch.set_rng_state(checkpoint['torch_random_state'])
         self.best_reward = checkpoint['best_reward']
-        self.validation_prices = checkpoint['validation_prices']
 
 
 if __name__ == '__main__':
@@ -373,13 +329,11 @@ if __name__ == '__main__':
     parser.add_argument('--beta1', type = float, default = 0.9, help = 'beta1')
     parser.add_argument('--cuda', action = 'store_true', help = 'cuda')
     parser.add_argument('--ngpu', type = int, default = 0, help = 'number of gpu')
-    parser.add_argument('--clip', type = float, default = 100, help = 'clip reward [-clip, clip]')
-    parser.add_argument('--clip_low', type = float, default = 0, help = 'lower bound for pnl | bound is - R_max / clip where R_max is 1 / kappa (max of utility function) | clip = 0 ==> -infinity')
-    parser.add_argument('--clip_high', type = float, default = 0, help = 'upper bound for pnl | bound is R_max / clip where R_max is 1 / kappa (max of utility function) | clip = 0 ==> infinity')
+    parser.add_argument('--scale', type = float, default = 1, help = 'scale reward by [_] | reward = [_] * reward | Takes priority over clip')
+    parser.add_argument('--clip', type = float, default = 100, help = 'clip reward between [-clip, clip]')
     parser.add_argument('--best_reward_criteria', type = int, default = 10, help = 'save model if mean reward over last [_] episodes greater than best reward')
     parser.add_argument('--trc_multiplier', type = float, default = 1, help = 'transaction cost multiplier')
     parser.add_argument('--trc_ticksize', type = float, default = 0.1, help = 'transaction cost ticksize')
-    parser.add_argument('--validate_every', type = int, default = 500, help = 'perform validation every [_] steps')
 
     args = parser.parse_args()
 
@@ -416,9 +370,7 @@ if __name__ == '__main__':
         'ss': 5,
         'kappa': 0.1,
         'multiplier': args.trc_multiplier,
-        'ticksize': args.trc_ticksize,
-        'clip_low': args.clip_low,
-        'clip_high': args.clip_high
+        'ticksize': args.trc_ticksize
         }
     env = OptionPricingEnv(config)
     env.configure()

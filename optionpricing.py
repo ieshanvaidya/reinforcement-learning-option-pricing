@@ -49,37 +49,21 @@ def compute_wealth(portfolio):
 class OptionPricingEnv:
     def __init__(self, config):
         """
-        S: stock price
-        T: days to maturity
-        L: number of option contracts
-        m: number of stocks per option
-        n: number of stocks
-        K: strike price
-        D: trading periods per day
-        mu: expected rate of return on the stock
-        sigma: volatility of stock
-        r: risk free rate
-        ss: number of steps between trading periods
-        kappa: risk aversion
+        config: Configuration dictionary with k:v as
+            S: stock price (float)
+            T: days to maturity (int or list of ints)
+            L: number of option contracts (int)
+            m: number of stocks per option (int)
+            n: number of stocks (int)
+            K: strike price (float or list of floats)
+            D: trading periods per day (int)
+            mu: expected rate of return on the stock (float)
+            sigma: volatility of stock (float)
+            r: risk free rate (float)
+            ss: number of steps between trading periods (int)
+            kappa: risk aversion (float)
         """
         self.config = config
-        """
-        # Portfolio
-        self.S = None
-        self.T = None
-        self.L = None
-        self.m = None
-        self.n = None
-        self.K = None
-        self.D = None
-        self.mu = None
-        self.sigma = None
-        self.r = None
-        self.ss = None
-
-        # Optimization
-        self.kappa = None
-        """
 
         self.trading_days = 252
         self.day = 24 / self.trading_days # 24 hours
@@ -108,7 +92,7 @@ class OptionPricingEnv:
         delta, gamma = compute_greeks(self.S, self.K, self.t, self.r, self.sigma)
         return delta
 
-    def configure(self):#, S, T, L, m, n, K, D, mu, sigma, r, ss, kappa, multiplier, ticksize, clip_low, clip_high):
+    def configure(self):
         self.S = self.config['S']
         try:
             self.T = random.choice(self.config['T'])
@@ -132,20 +116,6 @@ class OptionPricingEnv:
         self.kappa = self.config['kappa']
         self.multiplier = self.config['multiplier']
         self.ticksize = self.config['ticksize']
-        clip_low = self.config['clip_low']
-        clip_high = self.config['clip_high']
-
-        if clip_low == 0:
-            self.clip_low = -np.inf
-
-        else:
-            self.clip_low = -(1 / self.kappa) / clip_low
-
-        if clip_high == 0:
-            self.clip_high = np.inf
-
-        else:
-            self.clip_high = (1 / self.kappa) / clip_high
 
         self.S0 = self.S
         self.cash = 0
@@ -220,11 +190,11 @@ class OptionPricingEnv:
         cost = self.multiplier * self.ticksize * (abs(num_stocks) + 0.01 * num_stocks ** 2)
         self.cash -= cost
 
-        pnl = np.clip(compute_pnl(init_portfolio, self.portfolio), self.clip_low, self.clip_high)
+        pnl = compute_pnl(init_portfolio, self.portfolio)
 
         reward = (pnl - 0.5 * self.kappa * (pnl ** 2))
 
-        info = {'pnl': pnl, 'dn': self.action_map[action], 'call': np.array(calls), 'delta': np.array(deltas), 'gamma': np.array(gammas), 'cost': cost}
+        info = {'pnl': pnl, 'dn': num_stocks, 'call': np.array(calls), 'delta': np.array(deltas), 'gamma': np.array(gammas), 'cost': cost}
 
         self.done = self.steps == 0
 
