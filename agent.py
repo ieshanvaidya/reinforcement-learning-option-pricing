@@ -105,7 +105,7 @@ class Agent:
         self.target = Estimator(self.ngpu, state_space_dim, env.action_space.n).to(self.device)
 
         # Optimization
-        self.criterion = nn.SmoothL1Loss()
+        self.criterion = nn.SmoothL1Loss(reduction = 'mean')
         self.optimizer = optim.Adam(self.estimator.parameters(), lr = args.lr, betas = (args.beta1, 0.999))
 
         if args.resume:
