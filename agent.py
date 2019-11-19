@@ -14,6 +14,7 @@ import os
 import time
 import yaml
 import csv
+from copy import deepcopy
 from optionpricing import *
 
 # Defining transition namedtuple here rather than within the class to ensure pickle functionality
@@ -22,7 +23,7 @@ transition = namedtuple('transition',
 
 
 class Estimator(nn.Module):
-    def __init__(self, ngpu, state_space_dim, action_space_dim):
+    def __init__(self, nhidden, nunits, state_space_dim, action_space_dim):
         """
         Estimator class that returns Q-values
             ngpu: number of gpus
@@ -31,25 +32,30 @@ class Estimator(nn.Module):
         """
 
         super(Estimator, self).__init__()
-        self.ngpu = ngpu
         self.state_space_dim = state_space_dim
         self.action_space_dim = action_space_dim
 
-        self.model = nn.Sequential(
-            nn.Linear(self.state_space_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, self.action_space_dim)
-        )
+        assert nhidden > 0, 'Number of hidden layers must be > 0'
+
+        init_layer = nn.Linear(state_space_dim, nunits)
+        self.final_layer = nn.Linear(nunits, action_space_dim)
+
+        layers = [init_layer]
+        for n in range(nhidden - 1):
+            layers.append(nn.Linear(nunits, nunits))
+
+        self.module_list = nn.ModuleList(layers)
+
+        self.relu = nn.ReLU()
 
     def forward(self, x):
-        if x.is_cuda and self.ngpu > 1:
-            output = nn.parallel.data_parallel(self.model, x, range(self.ngpu))
-        else:
-            output = self.model(x)
+        for module in self.module_list:
+            x = module(x)
+            x = self.relu(x)
 
-        return output
+        x = self.final_layer(x)
+
+        return x
 
 
 class Agent:
@@ -94,12 +100,11 @@ class Agent:
 
         # Initialize model
         self.device = torch.device("cuda:0" if args.cuda else "cpu")
-        self.ngpu = args.ngpu
         state_shape = env.observation_space.shape
         state_space_dim = state_shape[0] if len(state_shape) == 1 else state_shape
 
-        self.estimator = Estimator(self.ngpu, state_space_dim, env.action_space.n).to(self.device)
-        self.target = Estimator(self.ngpu, state_space_dim, env.action_space.n).to(self.device)
+        self.estimator = Estimator(args.nhidden, args.nunits, state_space_dim, env.action_space.n).to(self.device)
+        self.target = Estimator(args.nhidden, args.nunits, state_space_dim, env.action_space.n).to(self.device)
 
         # Optimization
         self.criterion = nn.SmoothL1Loss(reduction = 'mean')
@@ -155,13 +160,13 @@ class Agent:
         self.train_logger.info(f'INFO: Replay memory initialized with {size} experiences')
 
 
-    def train(self, n_episodes, episode_length):
+    def train(self, nepisodes, episode_length):
         """
         Train the agent
         """
         train_rewards = []
 
-        for episode in tqdm(range(n_episodes)):
+        for episode in tqdm(range(nepisodes)):
             self.estimator.train()
             self.episode += 1
             episode_rewards = []
@@ -312,7 +317,7 @@ class Agent:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--n_episodes', type = int, default = 15000, help = 'number of episodes to train')
+    parser.add_argument('--nepisodes', type = int, default = 15000, help = 'number of episodes to train')
     parser.add_argument('--episode_length', type = int, default = 1000, help = 'maximum episode length')
     parser.add_argument('--epsilon', type = float, default = 1, help = 'e-greedy probability')
     parser.add_argument('--decay', type = float, default = 0.999, help = 'decay of epsilon per episode')
@@ -325,10 +330,11 @@ if __name__ == '__main__':
     parser.add_argument('--replay_memory_size', type = int, default = 64000, help = 'replay memory size')
     parser.add_argument('--seed', type = int, help = 'random seed')
     parser.add_argument('--savedir', type = str, help = 'save directory')
+    parser.add_argument('--nhidden', type = int, default = 2, help = 'number of hidden layers')
+    parser.add_argument('--nunits', type = int, default = 128, help = 'number of units in a hidden layer')
     parser.add_argument('--lr', type = float, default = 0.001, help = 'learning rate')
     parser.add_argument('--beta1', type = float, default = 0.9, help = 'beta1')
     parser.add_argument('--cuda', action = 'store_true', help = 'cuda')
-    parser.add_argument('--ngpu', type = int, default = 0, help = 'number of gpu')
     parser.add_argument('--scale', type = float, default = 1, help = 'scale reward by [_] | reward = [_] * reward | Takes priority over clip')
     parser.add_argument('--clip', type = float, default = 100, help = 'clip reward between [-clip, clip]')
     parser.add_argument('--best_reward_criteria', type = int, default = 10, help = 'save model if mean reward over last [_] episodes greater than best reward')
@@ -376,4 +382,4 @@ if __name__ == '__main__':
     env.configure()
 
     agent = Agent(env, args)
-    agent.train(args.n_episodes, args.episode_length)
+    agent.train(args.nepisodes, args.episode_length)
