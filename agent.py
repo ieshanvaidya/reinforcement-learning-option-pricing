@@ -77,7 +77,10 @@ class Agent:
         self.epsilon_min = args.epsilon_min
         self.savedir = args.savedir
         self.scale = args.scale
-        self.clip = args.clip
+        if args.clip == 0:
+            self.clip = np.inf
+        else:
+            self.clip = args.clip
         self.best_reward_criteria = args.best_reward_criteria # If mean reward over last 'best_reward_critera' > best_reward, save model
 
         # Get valid actions
@@ -336,7 +339,7 @@ if __name__ == '__main__':
     parser.add_argument('--beta1', type = float, default = 0.9, help = 'beta1')
     parser.add_argument('--cuda', action = 'store_true', help = 'cuda')
     parser.add_argument('--scale', type = float, default = 1, help = 'scale reward by [_] | reward = [_] * reward | Takes priority over clip')
-    parser.add_argument('--clip', type = float, default = 100, help = 'clip reward between [-clip, clip]')
+    parser.add_argument('--clip', type = float, default = 100, help = 'clip reward between [-clip, clip] | Pass in 0 for no clipping')
     parser.add_argument('--best_reward_criteria', type = int, default = 10, help = 'save model if mean reward over last [_] episodes greater than best reward')
     parser.add_argument('--trc_multiplier', type = float, default = 1, help = 'transaction cost multiplier')
     parser.add_argument('--trc_ticksize', type = float, default = 0.1, help = 'transaction cost ticksize')
