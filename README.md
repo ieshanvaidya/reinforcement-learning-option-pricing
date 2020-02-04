@@ -1,4 +1,4 @@
-# reinforcement-learning-option-pricing
+# Reinforcement Learning for Option Pricing
 A DQN agent that optimally hedges an options portfolio.
 
 ## Usage
